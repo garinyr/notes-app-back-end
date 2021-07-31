@@ -1,6 +1,7 @@
 require('dotenv').config();
 const Hapi = require('@hapi/hapi');
 const Jwt = require('@hapi/jwt');
+const ClientError = require('./exceptions/ClientError');
 
 // notes
 const notes = require('./api/notes');
@@ -24,6 +25,11 @@ const collaborations = require('./api/collaborations');
 const CollaborationsService = require('./services/postgres/CollaborationsService');
 const CollaborationsValidator = require('./validator/collaborations');
 
+// Exports
+const _exports = require('./api/exports');
+const ProducerService = require('./services/rabbitmq/ProducerService');
+const ExportsValidator = require('./validator/exports');
+
 const init = async () => {
   const collaborationsService = new CollaborationsService();
   const notesService = new NotesService(collaborationsService);
@@ -38,6 +44,35 @@ const init = async () => {
         origin: ['*'],
       },
     },
+  });
+
+  server.ext('onPreResponse', (request, h) => {
+    // mendapatkan konteks response dari request
+
+    const { response } = request;
+
+    if (response instanceof ClientError) {
+      /*
+      membuat response baru dari response
+      toolkit sesuai kebutuhan error handling
+      */
+
+      const newResponse = h.response({
+        status: 'fail',
+
+        message: response.message,
+      });
+
+      newResponse.code(response.statusCode);
+
+      return newResponse;
+    }
+
+    /*
+    jika bukan ClientError, lanjutkan
+    dengan response sebelumnya (tanpa terintervensi)
+    */
+    return response.continue || response;
   });
 
   // registrasi plugin eksternal
@@ -94,6 +129,13 @@ const init = async () => {
         collaborationsService,
         notesService,
         validator: CollaborationsValidator,
+      },
+    },
+    {
+      plugin: _exports,
+      options: {
+        service: ProducerService,
+        validator: ExportsValidator,
       },
     },
   ]);
